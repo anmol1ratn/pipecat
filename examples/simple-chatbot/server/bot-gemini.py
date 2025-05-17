@@ -17,9 +17,12 @@ the conversation flow using Gemini's streaming capabilities.
 """
 
 import asyncio
+import io
 import os
 import sys
+import wave
 
+import aiofiles
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
@@ -39,6 +42,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
@@ -102,6 +106,27 @@ class TalkingAnimation(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+async def _save_audio(audio: bytes, sample_rate: int, num_channels: int, name: str):
+    if len(audio) > 0:
+        recording_dir = os.getenv("RECORDINGS_PATH", "~/recordings")
+        os.makedirs(recording_dir, exist_ok=True)
+        filename = os.path.join(
+            recording_dir,
+            f"{name}_conversation_recording.wav",
+        )
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wf:
+                wf.setsampwidth(2)
+                wf.setnchannels(num_channels)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio)
+            async with aiofiles.open(filename, "wb") as file:
+                await file.write(buffer.getvalue())
+        print(f"Merged audio saved to {filename}")
+    else:
+        print("No audio data to save")
+
+
 async def main():
     """Main bot execution function.
 
@@ -156,6 +181,9 @@ async def main():
         #
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
+        # Initialize AudioBufferProcessor for storing full conversation audio
+        audio_buffer = AudioBufferProcessor()
+
         pipeline = Pipeline(
             [
                 transport.input(),
@@ -164,6 +192,7 @@ async def main():
                 llm,
                 ta,
                 transport.output(),
+                audio_buffer,
                 context_aggregator.assistant(),
             ]
         )
@@ -185,13 +214,21 @@ async def main():
             # Kick off the conversation
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
+        @audio_buffer.event_handler("on_audio_data")
+        async def on_audio_data(buffer, audio, sample_rate, num_channels):
+            await _save_audio(audio, sample_rate, num_channels, "full")
+
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             print(f"Participant joined: {participant}")
+            await audio_buffer.start_recording()
+            print("Recording started")
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
+            await audio_buffer.stop_recording()
+            print("Recording stopped")
             await task.cancel()
 
         runner = PipelineRunner()

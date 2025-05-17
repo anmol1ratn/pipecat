@@ -8,6 +8,7 @@ import { ConnectButton } from './components/ConnectButton';
 import { StatusDisplay } from './components/StatusDisplay';
 import { DebugDisplay } from './components/DebugDisplay';
 import './App.css';
+import { useEffect, useState } from 'react';
 
 function BotVideo() {
   const transportState = useRTVIClientTransportState();
@@ -18,6 +19,35 @@ function BotVideo() {
       <div className="video-container">
         {isConnected && <RTVIClientVideo participant="bot" fit="cover" />}
       </div>
+    </div>
+  );
+}
+
+function Recording() {
+  const transportState = useRTVIClientTransportState(); // Assuming this hook provides the state
+  const show = transportState === 'disconnected';
+
+   const [audioSrc, setAudioSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (transportState === 'disconnected') {
+      const freshUrl = `./recordings/full_conversation_recording.wav?timestamp=${Date.now()}`;
+      setAudioSrc(freshUrl);
+    } else {
+      setAudioSrc(null);
+    }
+  }, [transportState]);
+
+  return (
+    <div>
+      {show && audioSrc && (
+        <audio controls key={audioSrc}>
+          <source src={audioSrc} type="audio/wav" />
+        </audio>
+      )}
+       {show && !audioSrc && (
+          <p>Preparing recording...</p>
+       )}
     </div>
   );
 }
@@ -34,6 +64,7 @@ function AppContent() {
         <BotVideo />
       </div>
 
+      <Recording />
       <DebugDisplay />
       <RTVIClientAudio />
     </div>

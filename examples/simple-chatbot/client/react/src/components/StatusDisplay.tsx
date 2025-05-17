@@ -5,7 +5,7 @@ export function StatusDisplay() {
 
   return (
     <div className="status">
-      Status: <span>{transportState}</span>
+      Status: <span id="current-status">{transportState}</span>
     </div>
   );
 }
